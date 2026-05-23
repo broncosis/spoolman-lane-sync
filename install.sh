@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Spoolman Lane Sync — one-line installer
-# Usage:  curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh | bash
+# Usage:  bash <(curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh)
 set -euo pipefail
 
 REPO_URL="https://github.com/broncosis/spoolman-lane-sync.git"
 INSTALL_DIR="${HOME}/spoolman-lane-sync"
+VENV_DIR="${INSTALL_DIR}/venv"
 SERVICE_NAME="spoolman-lane-sync"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -37,13 +38,18 @@ if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"
     exit 1
 fi
 
-# ── aiohttp ───────────────────────────────────────────────────────────────────
-if "$PYTHON" -c "import aiohttp" 2>/dev/null; then
-    echo "aiohttp: already installed"
+# ── Virtual environment ───────────────────────────────────────────────────────
+if [[ -f "${VENV_DIR}/bin/python" ]]; then
+    echo "venv: already exists — skipping"
 else
-    echo "Installing aiohttp…"
-    "$PYTHON" -m pip install --user aiohttp
+    echo "Creating virtual environment in ${VENV_DIR}…"
+    "$PYTHON" -m venv "${VENV_DIR}"
 fi
+VENV_PYTHON="${VENV_DIR}/bin/python"
+
+echo "Installing aiohttp…"
+"${VENV_PYTHON}" -m pip install --quiet --upgrade aiohttp
+echo "aiohttp: installed"
 echo ""
 
 # ── Config (.env) ─────────────────────────────────────────────────────────────
@@ -53,7 +59,6 @@ if [[ -f "$ENV_FILE" ]]; then
     echo ".env: already exists — skipping (delete it to reconfigure)"
     echo ""
 else
-    # Prompt interactively when running in a terminal; use defaults when piped
     if [[ -t 0 ]]; then
         echo "Configure connection URLs (press Enter to accept default):"
         echo ""
@@ -98,8 +103,7 @@ SCRIPT="${INSTALL_DIR}/spoolman_lane_sync.py"
 echo "Writing ${SERVICE_FILE}  (sudo required)…"
 if ! sudo -v 2>/dev/null; then
     echo "ERROR: sudo access is required to install the systemd service."
-    echo "Run the script directly (not piped) so sudo can prompt for a password:"
-    echo ""
+    echo "Run with:"
     echo "  bash <(curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh)"
     exit 1
 fi
@@ -115,7 +119,7 @@ Wants=network-online.target
 Type=simple
 User=${CURRENT_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${PYTHON} ${SCRIPT}
+ExecStart=${VENV_PYTHON} ${SCRIPT}
 Restart=always
 RestartSec=10
 EnvironmentFile=-${ENV_FILE}
