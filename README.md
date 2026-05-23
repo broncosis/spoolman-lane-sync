@@ -37,7 +37,7 @@ configuration required.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh)
 ```
 
 The script will:
@@ -56,7 +56,7 @@ Watch logs:
 journalctl -u spoolman-lane-sync -f
 ```
 
-To update to the latest version, just re-run the install command — it will pull changes and restart the service.
+To update to the latest version, just re-run the same command — it will pull changes and restart the service.
 
 ---
 

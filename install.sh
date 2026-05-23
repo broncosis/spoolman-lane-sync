@@ -95,7 +95,15 @@ fi
 CURRENT_USER="$(whoami)"
 SCRIPT="${INSTALL_DIR}/spoolman_lane_sync.py"
 
-echo "Writing ${SERVICE_FILE}…"
+echo "Writing ${SERVICE_FILE}  (sudo required)…"
+if ! sudo -v 2>/dev/null; then
+    echo "ERROR: sudo access is required to install the systemd service."
+    echo "Run the script directly (not piped) so sudo can prompt for a password:"
+    echo ""
+    echo "  bash <(curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh)"
+    exit 1
+fi
+
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Spoolman to Moonraker lane_data sync
