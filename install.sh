@@ -52,6 +52,34 @@ echo "Installing aiohttp…"
 echo "aiohttp: installed"
 echo ""
 
+# ── Auto-detect Spoolman URL from moonraker.conf ──────────────────────────────
+_detect_spoolman_url() {
+    local candidates=(
+        "${HOME}/printer_data/config/moonraker.conf"
+        "${HOME}/klipper_config/moonraker.conf"
+        "/etc/moonraker.conf"
+    )
+    local in_section=0
+    for conf in "${candidates[@]}"; do
+        [[ -f "$conf" ]] || continue
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[spoolman\] ]]; then
+                in_section=1; continue
+            fi
+            if [[ $in_section -eq 1 ]]; then
+                [[ "$line" =~ ^\[ ]] && break
+                if [[ "$line" =~ ^server[[:space:]]*[:=][[:space:]]*(.+) ]]; then
+                    echo "${BASH_REMATCH[1]}" | xargs
+                    return 0
+                fi
+            fi
+        done < "$conf"
+        in_section=0
+    done
+}
+
+DETECTED_SPOOLMAN="$(_detect_spoolman_url || true)"
+
 # ── Config (.env) ─────────────────────────────────────────────────────────────
 ENV_FILE="${INSTALL_DIR}/.env"
 
@@ -59,27 +87,32 @@ if [[ -f "$ENV_FILE" ]]; then
     echo ".env: already exists — skipping (delete it to reconfigure)"
     echo ""
 else
+    MOONRAKER_URL="http://localhost:7125"
+    SPOOLMAN_URL="${DETECTED_SPOOLMAN:-http://localhost:7912}"
+    MR_API_KEY=""
+
+    if [[ -n "$DETECTED_SPOOLMAN" ]]; then
+        echo "Detected Spoolman URL from moonraker.conf: ${DETECTED_SPOOLMAN}"
+    fi
+
     if [[ -t 0 ]]; then
-        echo "Configure connection URLs (press Enter to accept default):"
+        echo "Configure connection URLs (press Enter to accept):"
         echo ""
 
-        read -r -p "  Moonraker URL  [http://localhost:7125]: " MOONRAKER_URL </dev/tty
-        MOONRAKER_URL="${MOONRAKER_URL:-http://localhost:7125}"
+        read -r -p "  Moonraker URL  [${MOONRAKER_URL}]: " _in </dev/tty
+        MOONRAKER_URL="${_in:-${MOONRAKER_URL}}"
 
-        read -r -p "  Spoolman URL   [http://localhost:7912]: " SPOOLMAN_URL </dev/tty
-        SPOOLMAN_URL="${SPOOLMAN_URL:-http://localhost:7912}"
+        read -r -p "  Spoolman URL   [${SPOOLMAN_URL}]: " _in </dev/tty
+        SPOOLMAN_URL="${_in:-${SPOOLMAN_URL}}"
 
         read -r -p "  Moonraker API key (leave blank if auth is off): " MR_API_KEY </dev/tty
         MR_API_KEY="${MR_API_KEY:-}"
 
         echo ""
     else
-        echo "Non-interactive install — writing defaults to .env."
-        echo "Edit ${ENV_FILE} to set your Moonraker and Spoolman URLs."
+        echo "Non-interactive install — using detected/default URLs."
+        echo "Edit ${ENV_FILE} to adjust if needed."
         echo ""
-        MOONRAKER_URL="http://localhost:7125"
-        SPOOLMAN_URL="http://localhost:7912"
-        MR_API_KEY=""
     fi
 
     cat > "$ENV_FILE" <<ENVEOF
