@@ -163,13 +163,11 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}"
+sudo systemctl restart "${SERVICE_NAME}"
 echo ""
 
 # ── Done ──────────────────────────────────────────────────────────────────────
-echo "✅  Installed and enabled: ${SERVICE_NAME}"
-echo ""
-echo "Start the service:"
-echo "  sudo systemctl start ${SERVICE_NAME}"
+echo "✅  Installed, enabled, and started: ${SERVICE_NAME}"
 echo ""
 echo "Watch logs:"
 echo "  journalctl -u ${SERVICE_NAME} -f"
