@@ -17,11 +17,12 @@ configuration required.
 1. On startup, checks Moonraker's `lane_data.source` key
 2. If unclaimed (or claimed by `spoolman`), takes ownership and syncs
 3. Queries Moonraker for the actual extruder count (open-ended)
-4. Fetches active spools from Spoolman, maps `Location = T0/T1/…` to slots
-5. Pushes all tool slots to `lane_data.tools` — empty entry for unloaded slots
-6. Listens to **Spoolman's WebSocket** — re-syncs on every spool change
-7. Listens to **Moonraker's WebSocket** — re-syncs when Klippy restarts
-8. Reconnects both WebSockets automatically with exponential backoff
+4. Reads per-tool spool assignments from Klipper's `save_variables`
+5. Fetches each spool's details from Spoolman by ID
+6. Pushes all tool slots to `lane_data.tools` — empty entry for unloaded slots
+7. Listens to **Spoolman's WebSocket** — re-syncs on every spool change
+8. Listens to **Moonraker's WebSocket** — re-syncs when a spool is reassigned or Klippy restarts
+9. Reconnects both WebSockets automatically with exponential backoff
 
 ---
 
@@ -59,9 +60,33 @@ journalctl -u spoolman-lane-sync -f
 
 ---
 
-## Tool assignment
+## How spool assignments work
 
-In Spoolman, set the **Location** field on each spool to its tool number:
+The service reads spool assignments directly from Klipper's `save_variables`.
+No extra steps needed — if your tool macros already track which spool is loaded,
+the sync is fully automatic.
+
+### save_variables (primary — recommended)
+
+Your tool macros store the active Spoolman spool ID in a saved variable named
+`T0__spool_id`, `T1__spool_id`, etc. The service reads these automatically.
+
+If you use KTC, StealthChanger, or a similar toolchanger setup that already
+manages spool IDs in macros, **nothing extra is required**.
+
+Example variables file entry:
+```
+[Variables]
+t0__spool_id = 32
+t1__spool_id = 15
+t2__spool_id = 22
+```
+
+### Spoolman Location field (fallback)
+
+If no `save_variables` assignments are found, the service falls back to
+matching spools by their **Location** field in Spoolman. Set the Location
+to the tool number to assign it:
 
 | Spoolman Location | Result in OrcaSlicer |
 |-------------------|----------------------|
@@ -73,9 +98,6 @@ In Spoolman, set the **Location** field on each spool to its tool number:
 
 Location is case-insensitive (`t0` and `T0` both work).
 
-Slots with no spool assigned get an empty entry — OrcaSlicer knows the slot
-exists but has nothing loaded.
-
 ---
 
 ## Verify it's working
@@ -85,18 +107,18 @@ curl -s 'http://localhost:7125/server/database/item?namespace=lane_data&key=tool
   | python3 -m json.tool
 ```
 
-Expected output (5-tool toolchanger, T0 and T1 loaded):
+Expected output (5-tool toolchanger, all slots loaded):
 ```json
 {
   "result": {
     "namespace": "lane_data",
     "key": "tools",
     "value": {
-      "0": { "material": "PLA",  "color": "FF3D00", "vendor": "eSun",  "name": "PLA Basic" },
-      "1": { "material": "PETG", "color": "0047AB", "vendor": "Bambu", "name": "PETG HF"   },
-      "2": { "material": "",     "color": "",        "vendor": "",      "name": ""           },
-      "3": { "material": "",     "color": "",        "vendor": "",      "name": ""           },
-      "4": { "material": "",     "color": "",        "vendor": "",      "name": ""           }
+      "0": { "material": "PLA",  "color": "E22A15", "vendor": "Mater3d", "name": "Pla Red"   },
+      "1": { "material": "PLA",  "color": "2815D6", "vendor": "Mater3d", "name": "Pla Blue"  },
+      "2": { "material": "PLA",  "color": "B80FD2", "vendor": "Eryone",  "name": "Pla Purple"},
+      "3": { "material": "PLA",  "color": "000000", "vendor": "Mater3d", "name": "Pla Black" },
+      "4": { "material": "PLA+", "color": "FFFFFF", "vendor": "ELEGOO",  "name": "Pla White" }
     }
   }
 }
@@ -160,7 +182,8 @@ Spoolman or Moonraker wasn't reachable at sync time. The service retries
 automatically via the WebSocket reconnect loop. Check URLs in `.env`.
 
 **OrcaSlicer shows wrong/no filament**
-- Verify the `Location` field in Spoolman is exactly `T0`, `T1`, etc.
+- Check that `save_variables` has `t0__spool_id`, `t1__spool_id`, etc.
+- Verify with: `curl -s 'http://localhost:7125/printer/objects/query?save_variables' | python3 -m json.tool`
 - Check the `lane_data.tools` key with the curl command above
 - Set `LOG_LEVEL=DEBUG` and check `journalctl -u spoolman-lane-sync -f`
 

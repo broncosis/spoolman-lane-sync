@@ -42,14 +42,15 @@ logging.basicConfig(
 LOG = logging.getLogger("spoolman_lane_sync")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-_LANE_NS       = "lane_data"
-_SOURCE_KEY    = "source"
-_TOOLS_KEY     = "tools"
-_MY_SOURCE     = "spoolman"
+_LANE_NS         = "lane_data"
+_SOURCE_KEY      = "source"
+_TOOLS_KEY       = "tools"
+_MY_SOURCE       = "spoolman"
 _EMPTY_SLOT: dict[str, Any] = {
     "material": "", "color": "", "vendor": "", "filament_id": ""
 }
-_LOC_RE        = re.compile(r"^[Tt](\d+)$")
+_VAR_RE          = re.compile(r"^t(\d+)__spool_id$", re.IGNORECASE)
+_LOC_RE          = re.compile(r"^[Tt](\d+)$")
 _RECONNECT_INIT  = 2.0
 _RECONNECT_MAX   = 60.0
 
@@ -84,8 +85,6 @@ class SpoolmanLaneSync:
             )
             return
 
-        # Run both WebSocket loops concurrently. Each does an initial sync
-        # on connection (and again after every reconnect).
         await asyncio.gather(
             self._spoolman_ws_loop(),
             self._moonraker_ws_loop(),
@@ -94,15 +93,13 @@ class SpoolmanLaneSync:
     # ── Source ownership ───────────────────────────────────────────────────────
 
     async def _claim_source(self) -> bool:
-        """Return True if we own (or can claim) the lane_data source key."""
         source = await self._db_get(_SOURCE_KEY)
         if source is None or source == _MY_SOURCE:
             await self._db_set(_SOURCE_KEY, _MY_SOURCE)
             LOG.info("lane_data source key claimed: '%s'", _MY_SOURCE)
             return True
         LOG.warning(
-            "lane_data is managed by '%s' — hands off. "
-            "(Happy Hare / AFC printers should leave this running for the MMU.)",
+            "lane_data is managed by '%s' — hands off.",
             source,
         )
         return False
@@ -110,25 +107,19 @@ class SpoolmanLaneSync:
     # ── Sync ──────────────────────────────────────────────────────────────────
 
     async def _sync(self) -> None:
-        """Fetch spools from Spoolman, build lane_data for every tool slot,
-        and push to Moonraker's database."""
+        """Build lane_data from per-tool spool assignments and push to Moonraker."""
         try:
             num_tools = await self._get_num_tools()
-            spools    = await self._fetch_spools()
+            # Primary: read tN__spool_id from Klipper save_variables
+            tool_map = await self._tool_map_from_variables()
+            # Fallback: match spools by Spoolman Location field (T0, T1, …)
+            if not tool_map:
+                LOG.debug("No save_variables assignments found — trying Location fallback")
+                tool_map = await self._tool_map_from_locations()
         except Exception as exc:
             LOG.warning("Sync skipped: %s", exc)
             return
 
-        # Build a map of tool-number → lane entry from spools with T* locations
-        tool_map: dict[int, dict] = {}
-        for spool in spools:
-            loc = (spool.get("location") or "").strip()
-            t = _tool_from_location(loc)
-            if t is not None:
-                tool_map[t] = _spool_to_lane(spool)
-
-        # Emit every slot T0…T(n-1) — empty entry for unloaded slots so
-        # OrcaSlicer knows the slot exists rather than treating it as missing.
         lane_data = {
             str(i): tool_map.get(i, _EMPTY_SLOT)
             for i in range(num_tools)
@@ -146,11 +137,86 @@ class SpoolmanLaneSync:
             loaded, num_tools, _lane_summary(lane_data),
         )
 
-    # ── Tool count (dynamic from Moonraker) ────────────────────────────────────
+    # ── Primary source: Klipper save_variables ─────────────────────────────────
+
+    async def _tool_map_from_variables(self) -> dict[int, dict]:
+        """Read t{n}__spool_id from save_variables, fetch each spool from Spoolman."""
+        try:
+            async with aiohttp.ClientSession(headers=self._mr_headers) as s:
+                async with s.get(
+                    f"{self._moonraker}/printer/objects/query",
+                    params={"save_variables": ""},
+                    raise_for_status=True,
+                ) as resp:
+                    data = await resp.json()
+        except Exception as exc:
+            LOG.debug("Could not read save_variables: %s", exc)
+            return {}
+
+        variables: dict = (
+            data.get("result", {})
+                .get("status", {})
+                .get("save_variables", {})
+                .get("variables", {})
+        )
+
+        assignments: dict[int, int] = {}
+        for key, val in variables.items():
+            m = _VAR_RE.match(key)
+            if m:
+                try:
+                    assignments[int(m.group(1))] = int(val)
+                except (TypeError, ValueError):
+                    pass
+
+        if not assignments:
+            return {}
+
+        LOG.debug("save_variables spool assignments: %s", assignments)
+
+        tool_map: dict[int, dict] = {}
+        for tool_num, spool_id in assignments.items():
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(
+                        f"{self._spoolman}/api/v1/spool/{spool_id}",
+                        raise_for_status=True,
+                    ) as resp:
+                        spool = await resp.json()
+                tool_map[tool_num] = _spool_to_lane(spool)
+            except Exception as exc:
+                LOG.warning("Could not fetch spool %d for T%d: %s", spool_id, tool_num, exc)
+
+        return tool_map
+
+    # ── Fallback source: Spoolman Location field ───────────────────────────────
+
+    async def _tool_map_from_locations(self) -> dict[int, dict]:
+        """Fallback: match active spools by Spoolman Location = T0/T1/…"""
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    f"{self._spoolman}/api/v1/spool",
+                    params={"allow_archived": "false"},
+                    raise_for_status=True,
+                ) as resp:
+                    spools: list[dict] = await resp.json()
+        except Exception as exc:
+            LOG.warning("Could not fetch spools from Spoolman: %s", exc)
+            return {}
+
+        tool_map: dict[int, dict] = {}
+        for spool in spools:
+            loc = (spool.get("location") or "").strip()
+            m = _LOC_RE.match(loc)
+            if m:
+                tool_map[int(m.group(1))] = _spool_to_lane(spool)
+        return tool_map
+
+    # ── Tool count ─────────────────────────────────────────────────────────────
 
     async def _get_num_tools(self) -> int:
-        """Query Moonraker for extruder objects to get the true tool count.
-        Fully open-ended: works for 1-tool printers through 12-lane AFC systems."""
+        """Count extruder* objects in Klipper — works for 1 to 12+ tools."""
         async with aiohttp.ClientSession(headers=self._mr_headers) as s:
             async with s.get(
                 f"{self._moonraker}/printer/objects/list",
@@ -161,25 +227,12 @@ class SpoolmanLaneSync:
         objects: list[str] = data.get("result", {}).get("objects", [])
         extruders = [o for o in objects if re.match(r"^extruder\d*$", o)]
         count = max(len(extruders), 1)
-        LOG.debug("Detected %d extruder(s): %s", count, extruders)
+        LOG.debug("Detected %d extruder(s)", count)
         return count
-
-    # ── Spoolman REST ─────────────────────────────────────────────────────────
-
-    async def _fetch_spools(self) -> list[dict]:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                f"{self._spoolman}/api/v1/spool",
-                params={"allow_archived": "false"},
-                raise_for_status=True,
-            ) as resp:
-                return await resp.json()
 
     # ── Spoolman WebSocket ─────────────────────────────────────────────────────
 
     async def _spoolman_ws_loop(self) -> None:
-        """Connect to Spoolman's WS feed, sync on every spool change event.
-        Reconnects with exponential backoff on failure."""
         ws_url = (
             self._spoolman
             .replace("http://", "ws://")
@@ -193,7 +246,6 @@ class SpoolmanLaneSync:
                     async with s.ws_connect(ws_url) as ws:
                         LOG.info("Spoolman WS connected: %s", ws_url)
                         delay = _RECONNECT_INIT
-                        # Sync immediately on (re)connect so we're never stale
                         await self._sync()
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -221,8 +273,8 @@ class SpoolmanLaneSync:
     # ── Moonraker WebSocket ────────────────────────────────────────────────────
 
     async def _moonraker_ws_loop(self) -> None:
-        """Connect to Moonraker's WS and re-sync whenever Klippy becomes ready.
-        This handles printer config reloads (which can change extruder count)."""
+        """Connect to Moonraker WS, subscribe to save_variables updates,
+        and re-sync whenever spool assignments or Klippy state changes."""
         ws_url = (
             self._moonraker
             .replace("http://", "ws://")
@@ -232,11 +284,20 @@ class SpoolmanLaneSync:
         delay = _RECONNECT_INIT
         while True:
             try:
-                headers = dict(self._mr_headers)
                 async with aiohttp.ClientSession() as s:
-                    async with s.ws_connect(ws_url, headers=headers) as ws:
+                    async with s.ws_connect(
+                        ws_url, headers=dict(self._mr_headers)
+                    ) as ws:
                         LOG.info("Moonraker WS connected")
                         delay = _RECONNECT_INIT
+                        # Subscribe to save_variables so we get notified when
+                        # the user reassigns a spool to a tool slot
+                        await ws.send_str(json.dumps({
+                            "jsonrpc": "2.0",
+                            "method": "printer.objects.subscribe",
+                            "params": {"objects": {"save_variables": None}},
+                            "id": 1,
+                        }))
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 await self._on_moonraker_event(json.loads(msg.data))
@@ -256,12 +317,16 @@ class SpoolmanLaneSync:
     async def _on_moonraker_event(self, data: dict) -> None:
         method = data.get("method", "")
         if method == "notify_klippy_ready":
-            # Klippy restarted (e.g. after FIRMWARE_RESTART or config reload).
-            # Extruder count may have changed — re-sync.
             LOG.info("Klippy ready — re-syncing lane_data")
             await self._sync()
         elif method == "notify_klippy_shutdown":
             LOG.info("Klippy shutdown — will re-sync when it comes back")
+        elif method == "notify_status_update":
+            # Re-sync whenever a save_variables change is reported
+            params = data.get("params", [{}])
+            if isinstance(params, list) and params and "save_variables" in params[0]:
+                LOG.debug("save_variables changed — re-syncing")
+                await self._sync()
 
     # ── Moonraker database ─────────────────────────────────────────────────────
 
@@ -289,7 +354,6 @@ class SpoolmanLaneSync:
     # ── Startup wait ───────────────────────────────────────────────────────────
 
     async def _wait_for_moonraker(self) -> None:
-        """Block until Moonraker is reachable and Klippy is ready."""
         LOG.info("Waiting for Moonraker…")
         delay = 2.0
         while True:
@@ -313,17 +377,10 @@ class SpoolmanLaneSync:
 
 # ── Pure helpers ───────────────────────────────────────────────────────────────
 
-def _tool_from_location(location: str) -> int | None:
-    """'T0' → 0, 'T1' → 1, 't2' → 2, anything else → None."""
-    m = _LOC_RE.match(location)
-    return int(m.group(1)) if m else None
-
-
 def _spool_to_lane(spool: dict) -> dict:
     filament  = spool.get("filament") or {}
     vendor    = filament.get("vendor") or {}
     raw_color = filament.get("color_hex") or ""
-    # Some filaments store multiple colours comma-separated; take the first.
     color_hex = raw_color.split(",")[0].replace("#", "").upper()
     return {
         "material":         filament.get("material") or "",
@@ -345,7 +402,6 @@ def _lane_summary(lane_data: dict) -> str:
 # ── Config (.env loader) ───────────────────────────────────────────────────────
 
 def _load_env() -> None:
-    """Load a .env file from the same directory as this script if present."""
     env_path = Path(__file__).parent / ".env"
     if not env_path.exists():
         return
