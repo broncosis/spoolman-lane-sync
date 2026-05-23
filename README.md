@@ -37,18 +37,16 @@ configuration required.
 ## Install
 
 ```bash
-cd ~
-git clone https://github.com/Broncosis/spoolman-lane-sync
-cd spoolman-lane-sync
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/broncosis/spoolman-lane-sync/main/install.sh | bash
 ```
 
-Edit config:
-```bash
-nano .env
-```
+The script will:
+- Clone the repo into `~/spoolman-lane-sync`
+- Prompt you for your Moonraker and Spoolman URLs
+- Install `aiohttp`
+- Create and enable the systemd service
 
-Start:
+Then start it:
 ```bash
 sudo systemctl start spoolman-lane-sync
 ```
@@ -57,6 +55,8 @@ Watch logs:
 ```bash
 journalctl -u spoolman-lane-sync -f
 ```
+
+To update to the latest version, just re-run the install command — it will pull changes and restart the service.
 
 ---
 
