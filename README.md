@@ -160,6 +160,17 @@ sudo systemctl restart spoolman-lane-sync
 
 ---
 
+## Credits
+
+This project stands on the shoulders of the teams that built the ecosystem it connects:
+
+- **[Spoolman](https://github.com/Donkie/Spoolman)** by Donkie — the spool management system that tracks filament inventory, usage, and metadata. Without Spoolman there's nothing to sync.
+- **[OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)** by SoftFever — the slicer that defined the `lane_data` namespace convention and reads filament info per tool slot automatically.
+- **[Moonraker](https://github.com/Arksine/moonraker)** by Arksine — the API layer that makes all of this possible, including the database namespace and WebSocket notification system this service relies on.
+- **[Klipper](https://github.com/Klipper3d/klipper)** by the Klipper team — the firmware running everything underneath.
+
+---
+
 ## Uninstall
 
 ```bash
