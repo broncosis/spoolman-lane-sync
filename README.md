@@ -36,7 +36,7 @@ configuration required.
 ## Install
 
 ```bash
-cd ~/printer_data/config        # or wherever you want it
+cd ~
 git clone https://github.com/Broncosis/spoolman-lane-sync
 cd spoolman-lane-sync
 ./install.sh
