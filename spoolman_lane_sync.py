@@ -53,6 +53,7 @@ _VAR_RE          = re.compile(r"^t(\d+)__spool_id$", re.IGNORECASE)
 _LOC_RE          = re.compile(r"^[Tt](\d+)$")
 _RECONNECT_INIT  = 2.0
 _RECONNECT_MAX   = 60.0
+_POLL_INTERVAL   = 30.0
 
 
 # ── Service ────────────────────────────────────────────────────────────────────
@@ -86,7 +87,7 @@ class SpoolmanLaneSync:
             return
 
         await asyncio.gather(
-            self._spoolman_ws_loop(),
+            self._spoolman_poll_loop(),
             self._moonraker_ws_loop(),
         )
 
@@ -230,47 +231,18 @@ class SpoolmanLaneSync:
         LOG.debug("Detected %d extruder(s)", count)
         return count
 
-    # ── Spoolman WebSocket ─────────────────────────────────────────────────────
+    # ── Spoolman poll loop ─────────────────────────────────────────────────────
 
-    async def _spoolman_ws_loop(self) -> None:
-        ws_url = (
-            self._spoolman
-            .replace("http://", "ws://")
-            .replace("https://", "wss://")
-            + "/api/v1/ws"
-        )
-        # Spoolman enforces CORS on the WebSocket — origin must match its host
-        ws_headers = {"Origin": self._spoolman}
-        delay = _RECONNECT_INIT
+    async def _spoolman_poll_loop(self) -> None:
+        """Poll Spoolman every 30 s to keep filament data current.
+        Spool assignment changes trigger an immediate re-sync via Moonraker WS."""
+        LOG.info("Spoolman poll loop started (interval: %.0fs)", _POLL_INTERVAL)
         while True:
+            await self._sync()
             try:
-                async with aiohttp.ClientSession() as s:
-                    async with s.ws_connect(ws_url, headers=ws_headers) as ws:
-                        LOG.info("Spoolman WS connected: %s", ws_url)
-                        delay = _RECONNECT_INIT
-                        await self._sync()
-                        async for msg in ws:
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                await self._on_spoolman_event(json.loads(msg.data))
-                            elif msg.type in (
-                                aiohttp.WSMsgType.CLOSED,
-                                aiohttp.WSMsgType.ERROR,
-                            ):
-                                break
-                LOG.warning("Spoolman WS closed — reconnecting in %.0fs…", delay)
+                await asyncio.sleep(_POLL_INTERVAL)
             except asyncio.CancelledError:
                 return
-            except Exception as exc:
-                LOG.warning("Spoolman WS error: %s — reconnecting in %.0fs…", exc, delay)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, _RECONNECT_MAX)
-
-    async def _on_spoolman_event(self, data: dict) -> None:
-        if data.get("resource") == "spool" and data.get("type") in (
-            "added", "updated", "deleted"
-        ):
-            LOG.debug("Spool '%s' event — re-syncing", data.get("type"))
-            await self._sync()
 
     # ── Moonraker WebSocket ────────────────────────────────────────────────────
 
