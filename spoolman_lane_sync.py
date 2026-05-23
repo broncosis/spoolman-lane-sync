@@ -44,7 +44,6 @@ LOG = logging.getLogger("spoolman_lane_sync")
 # ── Constants ──────────────────────────────────────────────────────────────────
 _LANE_NS         = "lane_data"
 _SOURCE_KEY      = "source"
-_TOOLS_KEY       = "tools"
 _MY_SOURCE       = "spoolman"
 _EMPTY_SLOT: dict[str, Any] = {
     "material": "", "color": "", "vendor": "", "filament_id": ""
@@ -121,17 +120,25 @@ class SpoolmanLaneSync:
             LOG.warning("Sync skipped: %s", exc)
             return
 
-        lane_data = {
-            str(i): tool_map.get(i, _EMPTY_SLOT)
-            for i in range(num_tools)
-        }
+        # Write each lane as its own key in the namespace.
+        # OrcaSlicer reads the whole namespace and identifies lanes by the
+        # "lane" field inside each object — the outer key name doesn't matter.
+        errors = 0
+        for i in range(num_tools):
+            entry = {**tool_map.get(i, _EMPTY_SLOT), "lane": str(i)}
+            try:
+                await self._db_set(str(i), entry)
+            except Exception as exc:
+                LOG.warning("Failed to write lane_data/%d: %s", i, exc)
+                errors += 1
 
-        try:
-            await self._db_set(_TOOLS_KEY, lane_data)
-        except Exception as exc:
-            LOG.warning("Failed to write lane_data: %s", exc)
+        if errors:
             return
 
+        # Remove legacy "tools" key written by older versions of this service
+        await self._db_delete("tools")
+
+        lane_data = {str(i): tool_map.get(i, _EMPTY_SLOT) for i in range(num_tools)}
         loaded = sum(1 for v in lane_data.values() if v.get("material"))
         LOG.info(
             "Synced — %d/%d tools loaded:  %s",
@@ -324,6 +331,14 @@ class SpoolmanLaneSync:
                 raise_for_status=True,
             ):
                 pass
+
+    async def _db_delete(self, key: str) -> None:
+        async with aiohttp.ClientSession(headers=self._mr_headers) as s:
+            async with s.delete(
+                f"{self._moonraker}/server/database/item",
+                params={"namespace": _LANE_NS, "key": key},
+            ):
+                pass  # ignore 404 if key didn't exist
 
     # ── Startup wait ───────────────────────────────────────────────────────────
 
