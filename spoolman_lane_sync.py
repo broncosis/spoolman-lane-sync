@@ -239,11 +239,13 @@ class SpoolmanLaneSync:
             .replace("https://", "wss://")
             + "/api/v1/ws"
         )
+        # Spoolman enforces CORS on the WebSocket — origin must match its host
+        ws_headers = {"Origin": self._spoolman}
         delay = _RECONNECT_INIT
         while True:
             try:
                 async with aiohttp.ClientSession() as s:
-                    async with s.ws_connect(ws_url) as ws:
+                    async with s.ws_connect(ws_url, headers=ws_headers) as ws:
                         LOG.info("Spoolman WS connected: %s", ws_url)
                         delay = _RECONNECT_INIT
                         await self._sync()
