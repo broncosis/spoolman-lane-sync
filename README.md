@@ -3,9 +3,9 @@
 Syncs Spoolman filament data into Moonraker's `lane_data` namespace so
 OrcaSlicer automatically sees which filament is loaded in each tool slot.
 
-Works with toolchangers (KTC, StealthChanger), IDEX, and any multi-extruder
-Klipper setup. Fully open-ended tool count — 1 tool through 12+ lanes, no
-configuration required.
+Should work with toolchangers (KTC, StealthChanger), IDEX, and most
+multi-extruder Klipper setups. Tool count is detected automatically —
+no configuration required, but your mileage may vary.
 
 **Hands off automatically** if Happy Hare or AFC is already managing
 `lane_data` — safe to install on any printer.
