@@ -3,12 +3,12 @@
 Syncs Spoolman filament data into Moonraker's `lane_data` namespace so
 OrcaSlicer automatically sees which filament is loaded in each tool slot.
 
-Should work with toolchangers (KTC, StealthChanger), IDEX, and most
-multi-extruder Klipper setups. Tool count is detected automatically —
-no configuration required, but your mileage may vary.
+Intended for toolchangers (KTC, StealthChanger), IDEX, and similar
+multi-extruder setups that don't have built-in `lane_data` support.
 
-**Hands off automatically** if Happy Hare or AFC is already managing
-`lane_data` — safe to install on any printer.
+> **Note:** Happy Hare and AFC already have their own `lane_data`
+> integration — you don't need this service if you're using either of
+> those. This service will detect them and back off automatically.
 
 ---
 
@@ -148,8 +148,10 @@ Set `LOG_LEVEL=DEBUG` to see every sync and WebSocket event in the logs.
 
 ## Coexistence with Happy Hare / AFC
 
-This service checks the `lane_data.source` key in Moonraker's database before
-doing anything:
+Happy Hare and AFC have their own built-in `lane_data` support — this service
+is not needed alongside them and will stay out of the way.
+
+On startup it checks the `lane_data.source` key in Moonraker's database:
 
 - If the key is **absent** or set to `spoolman` → takes ownership and syncs
 - If the key is set to `happy_hare`, `afc`, or anything else → exits immediately
