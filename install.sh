@@ -15,6 +15,29 @@ echo "║      Spoolman Lane Sync  —  installer     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
+# ── System dependencies ───────────────────────────────────────────────────────
+MISSING_PKGS=()
+command -v git    &>/dev/null || MISSING_PKGS+=(git)
+command -v python3 &>/dev/null || MISSING_PKGS+=(python3)
+python3 -c "import venv" 2>/dev/null || MISSING_PKGS+=(python3-venv)
+
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+    echo "Installing missing packages: ${MISSING_PKGS[*]}…"
+    sudo apt-get update -qq
+    sudo apt-get install -y "${MISSING_PKGS[@]}"
+    echo ""
+fi
+
+# ── Python version check ──────────────────────────────────────────────────────
+PYTHON="$(command -v python3)"
+echo "Python: $("$PYTHON" --version)"
+
+if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
+    echo "ERROR: Python 3.9+ is required."
+    echo "Try: sudo apt-get install -y python3.11"
+    exit 1
+fi
+
 # ── Git clone / update ────────────────────────────────────────────────────────
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     echo "Updating existing installation in ${INSTALL_DIR}…"
@@ -24,19 +47,6 @@ else
     git clone "${REPO_URL}" "${INSTALL_DIR}"
 fi
 echo ""
-
-# ── Python ────────────────────────────────────────────────────────────────────
-PYTHON="$(command -v python3 || true)"
-if [[ -z "$PYTHON" ]]; then
-    echo "ERROR: python3 not found. Install it with: sudo apt install python3"
-    exit 1
-fi
-echo "Python: $("$PYTHON" --version)"
-
-if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
-    echo "ERROR: Python 3.9+ is required. Install it with: sudo apt install python3"
-    exit 1
-fi
 
 # ── Virtual environment ───────────────────────────────────────────────────────
 if [[ -f "${VENV_DIR}/bin/python" ]]; then
@@ -173,7 +183,7 @@ echo "Watch logs:"
 echo "  journalctl -u ${SERVICE_NAME} -f"
 echo ""
 echo "Verify lane_data after starting:"
-echo "  curl -s 'http://localhost:7125/server/database/item?namespace=lane_data&key=tools' | python3 -m json.tool"
+echo "  curl -s 'http://localhost:7125/server/database/item?namespace=lane_data' | python3 -m json.tool"
 echo ""
 echo "Config file:  ${ENV_FILE}"
 echo ""

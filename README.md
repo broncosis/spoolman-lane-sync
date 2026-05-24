@@ -28,9 +28,14 @@ configuration required.
 
 ## Requirements
 
-- Python 3.9+
-- `aiohttp` (installed automatically by `install.sh`)
-- Moonraker and Spoolman accessible on your local network
+| Dependency | How it's handled |
+|---|---|
+| `git` | Auto-installed via `apt` if missing |
+| `python3` (3.9+) | Auto-installed via `apt` if missing |
+| `python3-venv` | Auto-installed via `apt` if missing |
+| `aiohttp` | Auto-installed into a venv by the installer |
+| Moonraker | Must be reachable on your network |
+| Spoolman | Must be reachable on your network |
 
 ---
 
