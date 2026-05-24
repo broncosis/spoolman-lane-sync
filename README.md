@@ -28,7 +28,7 @@ configuration required.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.9+
 - `aiohttp` (installed automatically by `install.sh`)
 - Moonraker and Spoolman accessible on your local network
 

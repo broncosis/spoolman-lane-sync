@@ -33,8 +33,8 @@ if [[ -z "$PYTHON" ]]; then
 fi
 echo "Python: $("$PYTHON" --version)"
 
-if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-    echo "ERROR: Python 3.10+ is required."
+if ! "$PYTHON" -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
+    echo "ERROR: Python 3.9+ is required. Install it with: sudo apt install python3"
     exit 1
 fi
 
