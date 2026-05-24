@@ -87,21 +87,12 @@ t1__spool_id = 15
 t2__spool_id = 22
 ```
 
-### Spoolman Location field (fallback)
+### Spoolman Location field (automatic fallback — you don't need to set this)
 
-If no `save_variables` assignments are found, the service falls back to
-matching spools by their **Location** field in Spoolman. Set the Location
-to the tool number to assign it:
-
-| Spoolman Location | Result in OrcaSlicer |
-|-------------------|----------------------|
-| `T0`              | Tool 0 (first tool)  |
-| `T1`              | Tool 1               |
-| `T2`              | Tool 2               |
-| *(blank)*         | Slot left empty      |
-| `Dry Box`         | Ignored              |
-
-Location is case-insensitive (`t0` and `T0` both work).
+If no `save_variables` assignments are found, the service will silently fall
+back to matching spools by their **Location** field in Spoolman (`T0`, `T1`,
+etc.). Most toolchanger users won't need this — it's there for setups that
+don't use the `save_variables` pattern.
 
 ---
 
